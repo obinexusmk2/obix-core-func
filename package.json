@@ -1,0 +1,37 @@
+{
+  "name": "@obinexusltd/obix-adapter-functional",
+  "version": "0.2.1",
+  "description": "OBIX Functional projection — pure reduce / replay + a create() closure. All action execution routes through obix-ir.applyAction. Depends on @obinexusltd/obix-spec and @obinexusltd/obix-ir.",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@obinexusltd/obix-spec": "0.2.1",
+    "@obinexusltd/obix-ir": "0.2.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/obinexusmk2/obix-monorepo-2026.git",
+    "directory": "packages/obix-adapter-functional"
+  }
+}
