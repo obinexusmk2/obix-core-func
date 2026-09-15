@@ -1,25 +1,26 @@
-import { applyAction } from "@obinexusltd/obix-ir";
+import { reduce, replay as fold, renderHtml, validate as validateState } from "./dop.js";
 export function toFunctional(artifact) {
-    const reduce = (state, actionName, payload, props = artifact.props) => applyAction(artifact, state, actionName, payload, props);
-    const replay = (trace, from = artifact.initialState, props = artifact.props) => {
-        let cur = from;
-        for (const [name, payload] of trace)
-            cur = reduce(cur, name, payload, props);
-        return cur;
-    };
+    const reduceOne = (state, actionName, payload, props) => reduce(artifact, state, actionName, payload, props);
+    const replayTrace = (trace, from, props) => fold(artifact, trace, from, props);
     const create = (opts = {}) => {
-        let cur = opts.state ?? artifact.initialState;
-        const props = Object.freeze({ ...artifact.props, ...(opts.props ?? {}) });
+        let current = opts.state ?? artifact.state;
+        const props = Object.freeze({ ...(artifact.props ?? {}), ...(opts.props ?? {}) });
         return {
-            getState: () => cur,
+            getState: () => current,
             dispatch(actionName, payload) {
-                cur = applyAction(artifact, cur, actionName, payload, props);
-                return cur;
+                current = reduce(artifact, current, actionName, payload, props);
+                return current;
             },
-            render: () => (artifact.render ? artifact.render(cur, props) : ""),
-            validate: () => (artifact.validate ? artifact.validate(cur, props) : { valid: true, violations: [] }),
+            render: () => renderHtml(artifact, current, props),
+            validate: () => validateState(artifact, current, props),
         };
     };
-    return { artifact, reduce, replay, create, pure: { reduce, replay } };
+    return {
+        artifact,
+        reduce: reduceOne,
+        replay: replayTrace,
+        create,
+        pure: { reduce: reduceOne, replay: replayTrace },
+    };
 }
 //# sourceMappingURL=index.js.map
