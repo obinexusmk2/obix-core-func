@@ -1,145 +1,100 @@
 # API reference
 
-Full type and function surface of `@obinexusltd/obix-core-func`, across
-`src/index.ts` (the public API), `src/dop.ts` (the vendored reducer, not
-exported directly but documented here since `index.ts`'s behavior is
-defined by it), and `src/types.ts` (the vendored DOP artifact types).
+Full type and function surface of `@obinexusltd/obix-core-func`.
 
-## Public exports (`src/index.ts`)
+## `createFunctional(definition, overrides?)`
 
 ```ts
-export function toFunctional<S extends object, P extends object = Record<string, unknown>>(
-  artifact: DOPComponent<S, P>,
-): FunctionalProjection<S, P>;
+function createFunctional<State extends object, Actions extends OBIXActionMap<State>>(
+  definition: OBIXDataDefinition<State, Actions>,
+  overrides?: { state?: State },
+): OBIXFunctionalInstance<State, Actions>;
+```
 
-export interface FunctionalInstance<S extends object> {
-  getState(): S;
-  dispatch(actionName: string, payload?: unknown): S;
-  render(): string;
-  validate(): ValidationResult;
-}
+`definition` comes from `@obinexusltd/obix-core-data`'s own `defineData` —
+import it from there, not from this package (this package only adds
+`createFunctional` on top; it doesn't re-export the data layer's own
+functions). `overrides.state`, when given, is passed straight through to
+`createDataInstance` — the same way to resume a functional instance from a
+previously taken snapshot.
 
-export interface FunctionalProjection<S extends object, P extends object> {
-  readonly artifact: DOPComponent<S, P>;
-  reduce(state: S, actionName: string, payload?: unknown, props?: P): S;
-  replay(trace: ActionTrace, from?: S, props?: P): S;
-  create(opts?: { state?: S; props?: Partial<P> }): FunctionalInstance<S>;
-  pure: {
-    reduce(state: S, actionName: string, payload?: unknown, props?: P): S;
-    replay(trace: ActionTrace, from?: S, props?: P): S;
+Internally, `createFunctional`:
+
+1. Calls `createDataInstance(definition, overrides)` — the *only* place
+   state is created or cloned. This package never clones, freezes, or
+   otherwise duplicates state itself.
+2. Binds each of `definition.actions` to a function that builds
+   `{ state: instance.state }` fresh on every call and invokes the
+   underlying action against it directly — unlike
+   `instance.actions` (obix-core-data's own bound actions, which discard
+   return values by design, since the data layer doesn't need them), this
+   binding returns whatever the action returns.
+3. Adds `getState()` (reads `instance.state` — the live, current value,
+   not a copy) and `snapshot()` (delegates to obix-core-data's own
+   `snapshotData(instance)` — no snapshot logic is reimplemented here).
+
+## `OBIXFunctionalInstance<State, Actions>`
+
+```ts
+type OBIXFunctionalInstance<State extends object, Actions extends OBIXActionMap<State>> =
+  OBIXFunctionalActions<State, Actions> & {
+    readonly instance: OBIXDataInstance<State, Actions>;
+    getState(): State;
+    snapshot(): OBIXSnapshot<State>;
   };
-}
 ```
 
-Also re-exported (type-only): `ActionContext`, `ActionFn`, `ActionTrace`,
-`DOPComponent`, `EffectDescriptor`, `RenderView`, `ValidationResult` — all
-from `src/types.ts`.
+Every key of `Actions` is callable directly on the returned object
+(`counter.increment()`, `counter.add(4)`) — no `context` argument, no
+`.actions.` prefix, no `dispatch("name", payload)` string lookup.
+`instance` is the exact `OBIXDataInstance` every bound action and
+`getState()` read from — there is one state value, not a copy held by
+this package and a second one held by obix-core-data.
 
-### `toFunctional(artifact)`
-
-The only factory. Stateless with respect to `artifact` — calling it
-multiple times on the same `artifact` object is safe and cheap; it just
-closes over three small functions (`reduceOne`, `replayTrace`, `create`)
-and returns a fresh object each time. See
-[reduce-and-replay.md](reduce-and-replay.md) and
-[create-closure-instance.md](create-closure-instance.md) for what each
-returned member actually does.
-
-## `DOPComponent<S, P>` (`src/types.ts`)
+## `OBIXFunctionalActions<State, Actions>`
 
 ```ts
-interface DOPComponent<S extends object = Record<string, unknown>, P extends object = Record<string, unknown>> {
-  name: string;
-  state: S;
-  props?: P;
-  actions: Record<string, ActionFn<S, P>>;
-  derived?: Record<string, (state: S, props: P) => unknown>;
-  effects?: Record<string, EffectDescriptor<S, P>>;
-  render?: (view: RenderView<S, P>) => string;
-  validate?: (state: S, props: P) => ValidationResult;
-}
+type OBIXFunctionalActions<State extends object, Actions extends OBIXActionMap<State>> = {
+  [K in keyof Actions]: (...args: OBIXActionArgs<State, Actions[K]>) => OBIXActionReturn<State, Actions[K]>;
+};
 ```
 
-| Field | Read by |
-|---|---|
-| `name` | `dop.ts`'s `reduce`, only to build the "unknown action" error message. |
-| `state` | Used as the default initial state by `replay` (when `from` is omitted) and `create` (when `opts.state` is omitted). |
-| `props` | Used as the default `props` by `reduce`/`replay`/`create`/`view`/`validate` whenever a call-site `props` isn't supplied. |
-| `actions` | `reduce` looks up `actions[actionName]`; also used to build the `ctx[name]` self-dispatch helpers (see [reduce-and-replay.md](reduce-and-replay.md)). |
-| `derived` | `view()` (called internally by `renderHtml`) computes each entry against the current `state`/`props`. |
-| `effects` | **Not read anywhere in this package.** Typed for a future effects runner; see the Boundary section in the [README](../README.md). |
-| `render` | `renderHtml()` calls it with the computed `RenderView`, if present; otherwise `renderHtml` returns `""`. |
-| `validate` | `validate()` calls it if present; otherwise returns `{ valid: true, violations: [] }`. |
+Reuses `OBIXActionArgs` from `obix-core-data` for argument types, and adds
+`OBIXActionReturn` (below) for the return type — so
+`add(ctx, amount: number): number` in the definition becomes
+`add(amount: number): number` here, not `add(...args: any[]): any`.
 
-### `ActionContext<S, P>`
+## `OBIXActionReturn<State, Action>`
 
 ```ts
-interface ActionContext<S extends object, P extends object = Record<string, unknown>> {
-  state: S;
-  props: P;
-  [action: string]: unknown;
-}
+type OBIXActionReturn<State, Action> = Action extends (
+  context: OBIXDataContext<State>,
+  ...args: any[]
+) => infer Return
+  ? Return
+  : never;
 ```
 
-The object every `ActionFn` receives as `ctx`. Beyond `state`/`props`, it
-also carries one callable property **per action name** in the component —
-see [reduce-and-replay.md](reduce-and-replay.md#ctx-carries-every-other-action-as-a-callable) for exactly what those do.
+Recovers one action's actual return type from the concrete function type
+TypeScript inferred at the `defineData(...)` call site.
+`obix-core-data`'s own `OBIXAction<State, Args>` is declared as returning
+`void` — correct for the data layer, which only needs the mutation — but a
+generic constraint only limits what's *allowed*, not what TypeScript
+*infers*: `defineData`'s `Actions` type parameter still carries each
+action's real, concrete return type (`number`, `Promise<number>`,
+whatever it actually is), and this type extracts it. See
+[architecture.md](architecture.md#why-not-instanceactions) for why this
+package binds actions itself instead of reusing
+`instance.actions` from obix-core-data.
 
-### `RenderView<S, P>`
+## What this package does **not** export
 
-```ts
-interface RenderView<S extends object, P extends object = Record<string, unknown>> {
-  state: S;
-  props: P;
-  derived: Record<string, unknown>;
-  [key: string]: unknown;
-}
-```
-
-What a component's `render(view)` function receives — see
-[reduce-and-replay.md](reduce-and-replay.md#view-and-renderhtml) for how
-it's assembled (it's not just `{ state, props, derived }` — every key of
-`props`, `state`, and `derived` is also spread onto the top level).
-
-### `EffectDescriptor<S, P>`
-
-```ts
-interface EffectDescriptor<S extends object, P extends object = Record<string, unknown>> {
-  everyMs: number;
-  while: (state: S, props: P) => boolean;
-  dispatch: string;
-}
-```
-
-Typed, exported, and assignable on `DOPComponent.effects` — but nothing in
-this package schedules `setInterval`-driven dispatches from it. `env.d.ts`
-declares ambient `setInterval`/`clearInterval` specifically so a consumer
-(or a future version of this package) could implement an effects runner
-without adding a dependency, but no such runner exists here yet.
-
-### `ValidationResult` / `ActionTrace` / `ActionFn`
-
-```ts
-interface ValidationResult { valid: boolean; violations: string[]; }
-type ActionFn<S, P> = (ctx: ActionContext<S, P>, payload?: unknown) => void;
-type ActionTrace = ReadonlyArray<readonly [string, unknown?]>;
-```
-
-`ActionFn` returns `void` — actions communicate their effect entirely by
-mutating `ctx.state` (and, via the `ctx[otherAction]` helpers, by
-triggering other actions), not by returning a value. `ActionTrace` entries
-are `[actionName]` or `[actionName, payload]` tuples — `replay` reads
-`step[0]`/`step[1]` positionally.
-
-## Vendored reducer (`src/dop.ts`, internal — not exported from the package)
-
-| Function | Used by |
-|---|---|
-| `reduce(component, state, actionName, payload?, props?)` | `index.ts`'s `reduceOne` and `create()`'s `dispatch`. |
-| `replay(component, trace, from?, props?)` | `index.ts`'s `replayTrace`, aliased as both `.replay` and `.pure.replay`. |
-| `view(component, state, props?)` | `renderHtml`, internally — not exposed on `FunctionalProjection`/`FunctionalInstance` directly. |
-| `renderHtml(component, state, props?)` | `create()`'s `render()`. |
-| `validate(component, state, props?)` | `create()`'s `validate()`. |
-| `changedKeys(prev, next)` | **Not called anywhere in `index.ts`.** Exported from `dop.ts` but unused by this package's public API — available if you import `./dop.js` directly (see [docs/zero-dependency-vendoring.md](zero-dependency-vendoring.md) on why these files are plain, importable modules rather than private internals). |
-
-Full behavior of each: [reduce-and-replay.md](reduce-and-replay.md).
+- No `defineData`, `createDataInstance`, `serializeData`, or any other
+  `obix-core-data` runtime export — import those from
+  `@obinexusltd/obix-core-data` directly. This package adds exactly one
+  function (`createFunctional`) on top of that layer.
+- No `dispatch(name, payload)` string-keyed action invocation — actions
+  are plain callable methods.
+- No `render`/`validate`/`derived`/`effects` — out of scope for a
+  functional-paradigm adapter; see the data layer's own
+  [architecture doc](../../obix-core-data/docs/architecture.md#why-no-reducerendervalidate-here).

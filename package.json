@@ -1,7 +1,7 @@
 {
   "name": "@obinexusltd/obix-core-func",
-  "version": "0.1.0",
-  "description": "OBIX Functional projection — pure reduce / replay + a create() closure instance, plus a .pure alias for callers migrating from the obix-spec/obix-ir-based API. Zero dependencies.",
+  "version": "0.2.0",
+  "description": "OBIX functional adapter — a callable-function interface (createFunctional) over a canonical @obinexusltd/obix-core-data definition. State stays owned by obix-core-data; this package binds actions and preserves their argument/return types.",
   "license": "MIT",
   "author": "OBINexus <okpalan@protonmail.com>",
   "type": "module",
@@ -16,6 +16,9 @@
     },
     "./src": "./src/index.ts",
     "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@obinexusltd/obix-core-data": "^0.4.0"
   },
   "files": [
     "dist",
